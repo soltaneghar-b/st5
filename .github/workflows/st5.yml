@@ -368,6 +368,15 @@ jobs:
           REFERER_URL: ${{ secrets.YT_CONVERT_REFERER }}
           USER_AGENT: ${{ secrets.YT_CONVERT_USER_AGENT }}
 
+      # ---------- sanitize filename ----------
+      - name: 🧼 Sanitize filename
+        run: |
+          FILENAME=$(sed -n '2p' /tmp/metadata.txt)
+          SANITIZED=$(python3 sanitize.py "$FILENAME")
+          echo "🧼 Sanitized: $FILENAME → $SANITIZED"
+          # Update metadata with the safe name
+          sed -i "2s/.*/$SANITIZED/" /tmp/metadata.txt
+
       # ---------- download & validate original ----------
       - name: 💾 Disk Space Check
         run: |
@@ -599,8 +608,8 @@ jobs:
               audio-player-template.html > /tmp/audio-player.html
           cp /tmp/audio-player.html ./audio-player.html
 
-      # ---------- split & push download branch ----------
-      - name: 📦 Split Original & Push to Download Branch
+      # ---------- split & push download branch (batched) ----------
+      - name: 📦 Split Original & Push to Download Branch (batched)
         run: |
           set -euo pipefail
           FILENAME=$(sed -n '2p' /tmp/metadata.txt)
@@ -650,7 +659,6 @@ jobs:
             else
               ZIP_BASE="video.zip"
             fi
-            # absolute path to input file
             cp "$OLDPWD/$INPUT_FILE" "./$FILENAME"
             zip -r -s "${SPLIT_SIZE}m" "$ZIP_BASE" "$FILENAME"
             rm -f "$FILENAME"
@@ -668,18 +676,40 @@ jobs:
           echo "📂 Files in download staging:"
           ls -lh "$DOWNLOAD_DIR"
 
-          # push as orphan branch
+          # ── batched push ──
           REPO_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           ORPHAN_DIR=$(mktemp -d)
           cp -a "$DOWNLOAD_DIR"/* "$ORPHAN_DIR/"
+
           cd "$ORPHAN_DIR"
           git init --initial-branch=main
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add origin "$REPO_URL"
-          git add .
-          git commit -m "chore: downloadable content [skip ci]" || { echo "ℹ️ Nothing to commit"; exit 0; }
-          git push origin "HEAD:${BRANCH_NAME_DOWNLOAD}" --force
+
+          mapfile -t FILES < <(ls -1)
+          TOTAL=${#FILES[@]}
+          BATCH_SIZE=50
+          FIRST=0
+          COMMIT_COUNT=0
+
+          while [ $FIRST -lt $TOTAL ]; do
+            BATCH=("${FILES[@]:$FIRST:$BATCH_SIZE}")
+            git add -- "${BATCH[@]}"
+            git commit -m "chore: dl part $((COMMIT_COUNT+1)) [skip ci]" || { echo "ℹ️ Empty batch"; break; }
+            COMMIT_COUNT=$((COMMIT_COUNT+1))
+            echo "🚀 Pushing download batch $COMMIT_COUNT (${#BATCH[@]} files)"
+            for attempt in 1 2 3; do
+              if [ $COMMIT_COUNT -eq 1 ]; then
+                git push origin "HEAD:${BRANCH_NAME_DOWNLOAD}" --force && break
+              else
+                git push origin "HEAD:${BRANCH_NAME_DOWNLOAD}" && break
+              fi
+              echo "⚠️ Push attempt $attempt failed, retrying in 5s..."
+              sleep 5
+            done
+            FIRST=$((FIRST + BATCH_SIZE))
+          done
           echo "✅ Download branch '${BRANCH_NAME_DOWNLOAD}' pushed"
 
       # ---------- push stream branch (batched, no hls.min.js needed) ----------
