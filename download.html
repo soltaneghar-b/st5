@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>در حال دانلود…</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#0a0a0a;
+    color:#fff;
+    font-family:system-ui, -apple-system, sans-serif;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    min-height:100vh;
+  }
+  .container {
+    background:#1a1a1a;
+    padding:32px 24px;
+    border-radius:16px;
+    width:90%;
+    max-width:500px;
+    text-align:center;
+    box-shadow:0 10px 30px rgba(0,0,0,0.5);
+  }
+  h2 {
+    font-size:20px;
+    margin-bottom:20px;
+    word-break:break-word;
+  }
+  progress {
+    width:100%;
+    height:12px;
+    border-radius:6px;
+    appearance:none;
+    -webkit-appearance:none;
+  }
+  progress::-webkit-progress-bar {
+    background:rgba(255,255,255,0.15);
+    border-radius:6px;
+  }
+  progress::-webkit-progress-value {
+    background:#ff3b30;
+    border-radius:6px;
+  }
+  p {
+    margin:16px 0;
+    font-size:14px;
+    color:#ccc;
+    line-height:1.8;
+  }
+  button, .part-link {
+    background:#ff3b30;
+    color:#fff;
+    border:none;
+    padding:14px 28px;
+    border-radius:8px;
+    font-size:16px;
+    cursor:pointer;
+    margin-top:8px;
+    text-decoration:none;
+    display:inline-block;
+  }
+  button:hover, .part-link:hover { background:#e0352b; }
+  button:disabled { opacity:0.5; cursor:not-allowed; }
+  .part-link { background:#333; }
+  .part-link:hover { background:#444; }
+  .hidden { display:none; }
+  .warning { color:#ffcc00; font-weight:bold; }
+  .parts-list { text-align:right; margin-top:16px; }
+  .parts-list a { display:block; margin:8px 0; }
+  .parts-list span { margin-left:12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h2 id="title">در حال آماده‌سازی دانلود…</h2>
+  <progress id="progress" value="0" max="100"></progress>
+  <p id="status"></p>
+  <button id="downloadBtn" class="hidden">⬇ دانلود</button>
+  <div id="manualFallback" class="hidden">
+    <p class="warning">ذخیره‌سازی خودکار در مرورگر شما پشتیبانی نمی‌شود.</p>
+    <p>می‌توانید ویدیو را در بخش‌های کوچکتر از لینک‌های زیر دانلود کنید. هر بخش یک فایل ویدیویی قابل پخش است.</p>
+    <div id="partsList" class="parts-list"></div>
+  </div>
+</div>
+
+<script>
+const parts = [{"name":"part_1.mp4","url":"https://raw.githubusercontent.com/soltaneghar-b/st5/refs/heads/download-26039930768/part_1.mp4","size":84674946},{"name":"part_2.mp4","url":"https://raw.githubusercontent.com/soltaneghar-b/st5/refs/heads/download-26039930768/part_2.mp4","size":84917047},{"name":"part_3.mp4","url":"https://raw.githubusercontent.com/soltaneghar-b/st5/refs/heads/download-26039930768/part_3.mp4","size":85403755},{"name":"part_4.mp4","url":"https://raw.githubusercontent.com/soltaneghar-b/st5/refs/heads/download-26039930768/part_4.mp4","size":83338578},{"name":"part_5.mp4","url":"https://raw.githubusercontent.com/soltaneghar-b/st5/refs/heads/download-26039930768/part_5.mp4","size":43758001}];
+const originalFilename = 'YOUTUBER_lar_i_in_Dikey_Video_Nas_l_Yap_l_r_Reels_Shor_B4cO8F8xaXs_1080p_20260518-143108.mp4';
+const totalSizeBytes = 382092327;
+
+const titleEl     = document.getElementById('title');
+const progressBar = document.getElementById('progress');
+const statusEl    = document.getElementById('status');
+const downloadBtn = document.getElementById('downloadBtn');
+const manualDiv   = document.getElementById('manualFallback');
+const partsListEl = document.getElementById('partsList');
+
+let isDownloading = false;
+
+(function init() {
+  const sizeMB = (totalSizeBytes / (1024 * 1024)).toFixed(1);
+  titleEl.textContent = `دانلود: ${originalFilename}`;
+  let msg = `حجم کل: ${sizeMB} مگابایت`;
+
+  if ('showSaveFilePicker' in window) {
+    msg += ' – مرورگر شما فایل کامل را با یک کلیک ذخیره می‌کند.';
+    downloadBtn.classList.remove('hidden');
+    downloadBtn.addEventListener('click', startDownload);
+  } else {
+    msg += ' – مرورگر شما از ذخیره‌سازی با یک کلیک پشتیبانی نمی‌کند.';
+    showManualFallback();
+  }
+
+  statusEl.textContent = msg;
+})();
+
+window.addEventListener('beforeunload', (e) => {
+  if (isDownloading) {
+    e.preventDefault();
+    e.returnValue = '';
+    return 'دانلود در حال انجام است. آیا مطمئن هستید که می‌خواهید خارج شوید؟';
+  }
+});
+
+async function startDownload() {
+  if (isDownloading) return;
+  isDownloading = true;
+  downloadBtn.disabled = true;
+  downloadBtn.textContent = '⏳ در حال ذخیره‌سازی…';
+
+  try {
+    await streamToFile();
+  } catch (err) {
+    console.error(err);
+    downloadBtn.classList.add('hidden');
+    showManualFallback();
+  } finally {
+    isDownloading = false;
+  }
+}
+
+async function streamToFile() {
+  const handle = await window.showSaveFilePicker({ suggestedName: originalFilename });
+  const writable = await handle.createWritable();
+
+  let bytesWritten = 0;
+
+  for (const part of parts) {
+    const resp = await fetchWithRetry(part.url);
+    const reader = resp.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      await writable.write(value);
+      bytesWritten += value.length;
+      updateProgress(bytesWritten, totalSizeBytes);
+    }
+  }
+
+  await writable.close();
+  statusEl.textContent = '✅ فایل ذخیره شد. می‌توانید این صفحه را ببندید.';
+  progressBar.value = 100;
+}
+
+function showManualFallback() {
+  if (!parts || parts.length === 0) {
+    statusEl.textContent = 'هیچ بخش دانلودی در دسترس نیست. لطفاً بعداً دوباره تلاش کنید.';
+    return;
+  }
+
+  statusEl.textContent = 'می‌توانید ویدیو را در بخش‌های کوچکتر از لینک‌های زیر دانلود کنید. هر بخش یک فایل ویدیویی قابل پخش است.';
+  manualDiv.classList.remove('hidden');
+
+  parts.forEach(p => {
+    const row = document.createElement('div');
+    row.style.marginBottom = '12px';
+
+    const label = document.createElement('span');
+    label.textContent = `${p.name} (${formatBytes(p.size)}) `;
+    label.style.color = '#ccc';
+
+    const link = document.createElement('a');
+    link.href = p.url;
+    link.className = 'part-link';
+    link.textContent = '⬇ دانلود';
+    link.download = p.name;
+
+    row.appendChild(label);
+    row.appendChild(link);
+    partsListEl.appendChild(row);
+  });
+}
+
+async function fetchWithRetry(url, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp;
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      const delay = 1000 * Math.pow(2, attempt);
+      statusEl.textContent = `مشکل شبکه، تلاش مجدد در ${delay / 1000} ثانیه…`;
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
+function updateProgress(bytesDone, totalBytes) {
+  const pct = Math.min(100, Math.round((bytesDone / totalBytes) * 100));
+  progressBar.value = pct;
+  statusEl.textContent = `در حال ذخیره‌سازی… ${pct}٪ (${formatBytes(bytesDone)} / ${formatBytes(totalBytes)})`;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' بایت';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' کیلوبایت';
+  return (bytes / 1048576).toFixed(1) + ' مگابایت';
+}
+</script>
+</body>
+</html>
